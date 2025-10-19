@@ -1,12 +1,8 @@
 #!/bin/bash
+set -eux
 
-unset $ROX_DIR
-
-if [ $1 ]; then
-	ROX_DIR=$1
-else
-	ROX_DIR="/var/www/bewelcome"
-fi
+WSL2_ROX_FILE=$(realpath "$0")
+WSL2_ROX_DIR=`echo $WSL2_ROX_FILE | rev | cut -c 16- | rev`
 
 wget https://repo.manticoresearch.com/manticore-repo.noarch.deb
 sudo dpkg -i manticore-repo.noarch.deb
@@ -19,10 +15,6 @@ sudo apt-get -y install acl file gettext git openssh-client python3
 sudo apt-get -y install php-intl php-gd php-mysql php-xml php-zip
 sudo apt-get -y install php-mbstring php-common php-xmlrpc
 sudo apt-get -y install zip php-fpm
-sudo systemctl start manticore
-sudo systemctl start nginx
-sudo systemctl start mariadb
-sudo systemctl start php8.4-fpm.service 
 
 if [ ! -f "/usr/share/keyrings/yarn-keyring.gpg" ]; then
 	curl -fsSL https://dl.yarnpkg.com/debian/pubkey.gpg | sudo gpg --dearmor -o /usr/share/keyrings/yarn-keyring.gpg
@@ -45,7 +37,7 @@ if [ ! -f "$HOME/bin/composer" ]; then
 	chmod +x $HOME/bin/composer
 fi
 
-cd $ROX_DIR
+cd /var/www/bewelcome
 
 cp .env .env.local
 sed -i 's/DB_HOST=db/DB_HOST=localhost/g' .env.local
@@ -102,7 +94,13 @@ MYSQL
 
 sudo mv bewelcome.conf /etc/nginx/conf.d/
 sudo cp docker/php/conf.d/bewelcome.prod.ini /etc/php/8.4/cli/conf.d/bewelcome.ini
-sudo cp docker/manticore/manticore.conf /etc/manticoresearch/manticore.conf
+sudo cp $WSL2_ROX_DIR/manticore.conf /etc/manticoresearch/manticore.conf
+sudo mkdir -p /var/www/bewelcome/manticore/
+sudo chown -R manticore:manticore /var/www/bewelcome/manticore/
+sudo mkdir -p /var/lib/manticore/
+sudo chown -R manticore:manticore /var/lib/manticore/
+sudo mkdir -p /var/log/manticore/
+sudo chown -R manticore:manticore /var/log/manticore/
 sudo mkdir -p /var/www/bewelcome/data/user/avatars
 sudo chgrp -R www-data /var/www/bewelcome/
 sudo chown -R www-data:www-data var build data
@@ -110,8 +108,11 @@ sudo mysql bewelcome -u bewelcome -pbewelcome < docker/db/languages.sql
 sudo mysql bewelcome -u bewelcome -pbewelcome < docker/db/words.sql 
 sudo mysql bewelcome -u bewelcome -pbewelcome < docker/db/geonamesadminunits.sql 
 sudo mysql bewelcome -u bewelcome -pbewelcome < reset_passwords.sql 
+rm reset_passwords.sql
 make build version
-
-sudo systemctl restart nginx
-sudo systemctl restart mariadb
-sudo systemctl restart php8.4-fpm.service 
+sudo systemctl start nginx
+sudo systemctl start mariadb
+sudo systemctl start php8.4-fpm.service
+sudo systemctl stop manticore
+sudo -u manticore bash -c "indexer --config /etc/manticoresearch/manticore.conf --all"
+sudo systemctl start manticore
